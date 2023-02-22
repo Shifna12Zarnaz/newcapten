@@ -1,0 +1,112 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: pipeline
+spec:
+  resources:
+    - name: source-repo
+      type: git
+    - name: image-source
+      type: image
+    - name: event-to-sink
+      type: cloudEvent
+  tasks:
+    - name: build-docker-image
+      taskRef:
+        name: build-docker-image
+      params:
+        - name: pathToContext
+          value: /workspace/source-repo
+      resources:
+        inputs:
+          - name: source-repo
+            resource: source-repo
+        outputs:
+          - name: builtImage
+            resource: image-source
+---
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: build-docker-image
+spec:
+  params:
+  - name: pathToContext
+    description:
+      The build directory used by img
+    default: $(resources.inputs.source-repo.path)
+  - name: pathToDockerFile
+    type: string
+    description: The path to the dockerfile to build
+    default: $(resources.inputs.source-repo.path)/Dockerfile
+  resources:
+    inputs:
+      - name: source-repo
+        type: git
+    outputs:
+      - name: builtImage
+        type: image
+  results:
+    - name: IMAGE_DIGEST
+      description: Digest of the image just built.
+    - name: IMAGE_URL
+      description: URL of the image just built.
+  steps:
+    - name: build-and-push
+      image: gcr.io/kaniko-project/executor:v1.5.1@sha256:c6166717f7fe0b7da44908c986137ecfeab21f31ec3992f6e128fff8a94be8a5
+      command:
+        - /kaniko/executor
+      args:
+        - --dockerfile=$(params.pathToDockerFile)
+        - --destination=$(resources.outputs.builtImage.url)
+        - --context=$(params.pathToContext)
+        - --single-snapshot
+        - --digest-file=$(results.IMAGE_DIGEST.path)
+      # makes it explicit that it needs to run as root.
+      securityContext:
+        runAsUser: 0
+      volumeMounts:
+        - name: docker-config
+          mountPath: /kaniko/.docker/
+    - name: write-url
+      image: docker.io/library/bash:5.1.4@sha256:c523c636b722339f41b6a431b44588ab2f762c5de5ec3bd7964420ff982fb1d9
+      script: |
+        set -e
+        image="$(resources.outputs.builtImage.url)"
+        echo -n "${image}" | tee "$(results.IMAGE_URL.path)"
+  volumes:
+    - name: docker-config
+      secret:
+        secretName: gitlab-docker-config
+        items:
+          - key: .dockerconfigjson
+            path: config.json
+---
+# Finally, we need something to receive our cloudevent announcing success!
+# That is this services only purpose
+apiVersion: v1
+kind: Service
+metadata:
+  name: event-display
+  labels:
+    app: event-display
+spec:
+  type: ClusterIP
+  ports:
+    - name: listener
+      port: 8080
+      protocol: TCP
+  selector:
+    app: event-display
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: event-display
+  labels:
+    app: event-display
+spec:
+  hostname: event-display
+  containers:
+  - image: gcr.io/knative-releases/github.com/knative/eventing-sources/cmd/event_display
+    name: web

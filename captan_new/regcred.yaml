@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: gitlab-registry-credentials
+  namespace: build
+  annotations:
+          tekton.dev/docker-0: registry.gitlab.com
+type: kubernetes.io/basic-auth
+stringData:
+  username: jebinjohn 
+  password: glpat-KrzHTzYz-6jkMMQYyGrw
+
+
