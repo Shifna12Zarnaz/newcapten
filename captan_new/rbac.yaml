@@ -25,7 +25,7 @@ metadata:
 subjects:
 - kind: ServiceAccount
   name: tekton-triggers-sa
-  namespace: build
+  namespace: capten-build
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
